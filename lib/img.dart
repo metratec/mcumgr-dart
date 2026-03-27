@@ -343,6 +343,7 @@ class SlotInfo {
 
 const _imageHeaderMagic = 0x96f3b83d;
 const _imageTLVMagic = 0x6907;
+const _imageProtectedTLVMagic = 0x6908;
 
 int _decodeInt(List<int> input, int offset, int length) {
   var result = 0;
@@ -400,13 +401,18 @@ class McuImageHeader {
 }
 
 class McuImageTLV {
+  final int magic;
+  final int totalLength;
   final List<McuImageTLVEntry> entries;
 
-  McuImageTLV(this.entries);
+  McuImageTLV(this.magic, this.totalLength, this.entries);
+
+  /// Whether this is a protected TLV section (magic 0x6908).
+  bool get isProtected => magic == _imageProtectedTLVMagic;
 
   factory McuImageTLV.decode(List<int> input, int offset) {
     final magic = _decodeInt(input, offset, 2);
-    if (magic != _imageTLVMagic) {
+    if (magic != _imageTLVMagic && magic != _imageProtectedTLVMagic) {
       throw const FormatException('incorrect TLV magic');
     }
     final length = _decodeInt(input, offset + 2, 2);
@@ -418,7 +424,7 @@ class McuImageTLV {
       entries.add(entry);
       offset += entry.length + 4;
     }
-    return McuImageTLV(entries);
+    return McuImageTLV(magic, length, entries);
   }
 }
 
@@ -443,8 +449,17 @@ class McuImageTLVEntry {
 
 class McuImage {
   final McuImageHeader header;
+
+  /// The main (unprotected) TLV section.
   final McuImageTLV tlv;
+
+  /// The protected TLV section, if present.
+  final McuImageTLV? protectedTlv;
+
   final List<int> hash;
+
+  /// The raw firmware binary data.
+  final List<int> content;
 
   static List<int> _getHash(McuImageTLV tlv) {
     for (final entry in tlv.entries) {
@@ -453,12 +468,32 @@ class McuImage {
     throw const FormatException("image doesn't contain hash");
   }
 
-  McuImage(this.header, this.tlv) : hash = _getHash(tlv);
+  McuImage(this.header, this.tlv, this.content, {this.protectedTlv})
+      : hash = _getHash(tlv);
 
+  /// Decodes an MCUboot image file.
+  ///
+  /// Handles images with an optional protected TLV section (magic 0x6908)
+  /// followed by the main TLV section (magic 0x6907).
   factory McuImage.decode(List<int> input) {
     final header = McuImageHeader.decode(input);
-    final tlv = McuImageTLV.decode(input, header.headerSize + header.imageSize);
-    return McuImage(header, tlv);
+    int offset = header.headerSize + header.imageSize;
+
+    // First TLV section - could be protected or main
+    final firstTlv = McuImageTLV.decode(input, offset);
+
+    McuImageTLV? protectedTlv;
+    McuImageTLV mainTlv;
+
+    if (firstTlv.isProtected) {
+      protectedTlv = firstTlv;
+      offset += firstTlv.totalLength;
+      mainTlv = McuImageTLV.decode(input, offset);
+    } else {
+      mainTlv = firstTlv;
+    }
+
+    return McuImage(header, mainTlv, input, protectedTlv: protectedTlv);
   }
 
   @override
