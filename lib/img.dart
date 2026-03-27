@@ -9,6 +9,7 @@ const _imgGroup = 1;
 const _imgCmdState = 0;
 const _imgCmdUpload = 1;
 const _imgCmdErase = 5;
+const _imgCmdSlotInfo = 6;
 
 /// The state of the images on a device.
 class ImageState {
@@ -248,6 +249,60 @@ extension ClientImgExtension on Client {
       timeout,
     ).unwrap();
   }
+
+  /// Gets detailed slot information (sizes, upload IDs).
+  Future<SlotInfo> slotInfo(Duration timeout) {
+    return execute(
+      Message(op: Operation.read, group: _imgGroup, id: _imgCmdSlotInfo,
+              flags: 0, data: CborMap({})),
+      timeout,
+    ).unwrap().then((value) => SlotInfo(value.data));
+  }
+}
+
+class SlotInfoEntry {
+  final int slot;
+  final int? uploadImageId;
+  final int? size;
+
+  SlotInfoEntry(CborMap input)
+      : slot = (input[CborString('slot')] as CborInt).toInt(),
+        uploadImageId =
+            (input[CborString('upload_image_id')] as CborInt?)?.toInt(),
+        size = (input[CborString('size')] as CborInt?)?.toInt();
+
+  @override
+  String toString() => 'SlotEntry{slot=$slot, size=$size}';
+}
+
+class SlotInfoImage {
+  final int image;
+  final int? maxImageSize;
+  final List<SlotInfoEntry> slots;
+
+  SlotInfoImage(CborMap input)
+      : image = (input[CborString('image')] as CborInt).toInt(),
+        maxImageSize =
+            (input[CborString('max_image_size')] as CborInt?)?.toInt(),
+        slots = (input[CborString('slots')] as CborList)
+            .map((v) => SlotInfoEntry(v as CborMap))
+            .toList();
+
+  @override
+  String toString() =>
+      'SlotImage{image=$image, maxSize=$maxImageSize, slots=$slots}';
+}
+
+class SlotInfo {
+  final List<SlotInfoImage> images;
+
+  SlotInfo(CborMap input)
+      : images = (input[CborString('images')] as CborList)
+            .map((v) => SlotInfoImage(v as CborMap))
+            .toList();
+
+  @override
+  String toString() => 'SlotInfo{images=$images}';
 }
 
 const _imageHeaderMagic = 0x96f3b83d;
