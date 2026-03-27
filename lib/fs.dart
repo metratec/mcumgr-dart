@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:cbor/cbor.dart';
 import 'package:mcumgr/client.dart';
@@ -54,23 +55,46 @@ class HashType {
 }
 
 extension ClientFsExtension on Client {
+  /// Calculates optimal FS upload chunk size from client's maxPacketSize.
+  int _fsAutoChunkSize(String name, List<int> data, int offset) {
+    final mps = maxPacketSize;
+    if (mps == null) return 64; // fallback
+
+    const headerSize = 8;
+    const mapSize = 2;
+    final nameSize = cbor.encode(CborString('name')).length +
+        cbor.encode(CborString(name)).length;
+    final offSize = cbor.encode(CborString('off')).length +
+        cbor.encode(CborSmallInt(offset)).length;
+    final lenSize = offset == 0
+        ? cbor.encode(CborString('len')).length +
+            cbor.encode(CborSmallInt(data.length)).length
+        : 0;
+    final dataKeySize = cbor.encode(CborString('data')).length;
+
+    final overhead = headerSize + mapSize + nameSize + offSize + lenSize + dataKeySize;
+    final maxDataLen = mps - overhead;
+    final dataLenHeaderSize = cbor.encode(CborSmallInt(maxDataLen)).length;
+    return min(max(mps - overhead - dataLenHeaderSize, 1), data.length - offset);
+  }
+
   /// Uploads a file to the device.
   ///
   /// [name] is the remote file path (e.g. `/lfs/myfile.txt`).
   /// [data] is the file contents.
-  /// [onProgress] is called with the number of bytes uploaded so far.
+  /// If [chunkSize] is null, the optimal size is calculated from
+  /// [Client.maxPacketSize].
   Future<void> fsUpload(
     String name,
     List<int> data,
     Duration chunkTimeout, {
-    int chunkSize = 64,
+    int? chunkSize,
     void Function(int)? onProgress,
   }) async {
     int offset = 0;
     while (offset < data.length) {
-      final end = (offset + chunkSize > data.length)
-          ? data.length
-          : offset + chunkSize;
+      final cs = chunkSize ?? _fsAutoChunkSize(name, data, offset);
+      final end = (offset + cs > data.length) ? data.length : offset + cs;
       final chunk = data.sublist(offset, end);
 
       final reqData = <CborValue, CborValue>{

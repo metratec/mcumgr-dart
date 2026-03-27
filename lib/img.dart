@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:cbor/cbor.dart';
 import 'package:mcumgr/client.dart';
@@ -79,7 +80,7 @@ class _ImageUpload {
   final List<int> data;
   final List<int> hash;
   final Duration chunkTimeout;
-  final int maxChunkSize;
+  final int? maxChunkSize;
   final void Function(int)? onProgress;
   final int windowSize;
   final List<_ImageUploadChunk> pending = [];
@@ -96,10 +97,41 @@ class _ImageUpload {
     required this.windowSize,
   });
 
+  /// Calculates optimal chunk size from the client's maxPacketSize.
+  /// Based on nRF Connect Device Manager's Uploader.kt algorithm.
+  int _autoChunkSize(int offset) {
+    final mps = client.maxPacketSize;
+    if (mps == null) return 128; // fallback
+
+    const headerSize = 8; // SMP header
+    const mapSize = 2; // CBOR indefinite map tokens (0xBF, 0xFF)
+    final offSize = cbor.encode(CborString('off')).length +
+        cbor.encode(CborSmallInt(offset)).length;
+    final lenSize = offset == 0
+        ? cbor.encode(CborString('len')).length +
+            cbor.encode(CborSmallInt(data.length)).length
+        : 0;
+    final firstChunkExtra = offset == 0
+        ? cbor.encode(CborString('sha')).length +
+            cbor.encode(CborBytes(hash)).length +
+            cbor.encode(CborString('image')).length +
+            cbor.encode(CborSmallInt(image)).length
+        : 0;
+    final dataKeySize = cbor.encode(CborString('data')).length;
+
+    final overhead =
+        headerSize + mapSize + offSize + lenSize + firstChunkExtra + dataKeySize;
+    final maxDataLen = mps - overhead;
+    // Account for CBOR byte string length header
+    final dataLenHeaderSize = cbor.encode(CborSmallInt(maxDataLen)).length;
+    return min(max(mps - overhead - dataLenHeaderSize, 1), data.length - offset);
+  }
+
   int sendChunk(int offset) {
     int chunkSize = data.length - offset;
-    if (chunkSize > maxChunkSize) {
-      chunkSize = maxChunkSize;
+    final limit = maxChunkSize ?? _autoChunkSize(offset);
+    if (chunkSize > limit) {
+      chunkSize = limit;
     }
     if (chunkSize <= 0) {
       return 0;
@@ -226,9 +258,13 @@ extension ClientImgExtension on Client {
   }
 
   /// Uploads an image to the device.
+  ///
+  /// If [chunkSize] is null, the optimal size is calculated from the
+  /// client's [Client.maxPacketSize] (set via `mtu` in the constructor).
+  /// For serial transport, 64 is a safe explicit value.
   Future<void> uploadImage(
     int image, List<int> data, List<int> hash, Duration chunkTimeout, {
-    int chunkSize = 128,
+    int? chunkSize,
     void Function(int)? onProgress,
     int windowSize = 3,
   }) async {

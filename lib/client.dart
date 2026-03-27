@@ -15,6 +15,16 @@ typedef WriteCallback = void Function(List<int>);
 ///
 /// Multiple commands may be executed at the same time.
 class Client {
+  /// Maximum SMP packet size for this transport, or null for no limit.
+  ///
+  /// For BLE: set to `mtu - 3` (ATT overhead).
+  /// For serial: set to the Zephyr `CONFIG_MCUMGR_TRANSPORT_SHELL_MTU` value
+  /// (typically 256).
+  ///
+  /// Used by [uploadImage] and [fsUpload] to auto-calculate the optimal
+  /// chunk size when no explicit `chunkSize` is provided.
+  final int? maxPacketSize;
+
   final _input = StreamController<Packet>.broadcast();
   final _output = StreamController<Packet>.broadcast();
   late StreamSubscription<Packet> _subscription;
@@ -22,13 +32,18 @@ class Client {
 
   /// Creates a client.
   ///
-  /// When executing a client, the request is sent using the [output] callback
-  /// and the response is read from the [input] stream.
+  /// [mtu] is the transport MTU. For BLE pass the negotiated MTU (the
+  /// library subtracts the 3-byte ATT header). For serial pass the raw
+  /// MCUMgr shell MTU (no subtraction). Leave null to disable auto chunk
+  /// sizing (you must then pass explicit `chunkSize` to upload methods).
   Client({
     required Stream<List<int>> input,
     required WriteCallback output,
     Encoding encoding = smp,
-  }) {
+    int? mtu,
+  }) : maxPacketSize = mtu != null
+           ? (encoding is Smp ? mtu - 3 : mtu)
+           : null {
     _subscription = encoding.decode(input).listen(
           _input.add,
           onError: _input.addError,
