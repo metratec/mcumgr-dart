@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:cbor/cbor.dart';
-import 'package:mcumgr/mcumgr.dart';
 import 'package:mcumgr/msg.dart';
 import 'package:mcumgr/packet.dart';
 import 'package:mcumgr/src/encoding.dart';

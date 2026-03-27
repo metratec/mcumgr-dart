@@ -7,6 +7,7 @@ class Header {
   final int group;
   final int sequence;
   final int id;
+  final int version;
 
   const Header({
     required this.type,
@@ -15,12 +16,14 @@ class Header {
     required this.group,
     required this.sequence,
     required this.id,
+    this.version = 1, // SMP v2
   });
 
   static const encodedLength = 8;
 
   Header.decode(List<int> input)
       : type = input[0] & 0x07,
+        version = (input[0] >> 3) & 0x03,
         flags = input[1],
         length = ((input[2] << 8) | input[3]),
         group = ((input[4] << 8) | input[5]),
@@ -29,7 +32,7 @@ class Header {
 
   List<int> encode() {
     return [
-      type & 0x07,
+      (type & 0x07) | ((version & 0x03) << 3),
       flags,
       (length >> 8) & 0xFF,
       length & 0xFF,
@@ -42,7 +45,8 @@ class Header {
 
   @override
   String toString() {
-    return 'Header{type: $type, flags: $flags, length: $length, group: $group, sequence: $sequence, id: $id}';
+    return 'Header{type: $type, version: $version, flags: $flags, '
+        'length: $length, group: $group, sequence: $sequence, id: $id}';
   }
 
   @override
@@ -51,6 +55,7 @@ class Header {
       other is Header &&
           runtimeType == other.runtimeType &&
           type == other.type &&
+          version == other.version &&
           flags == other.flags &&
           length == other.length &&
           group == other.group &&
@@ -60,6 +65,7 @@ class Header {
   @override
   int get hashCode =>
       type.hashCode ^
+      version.hashCode ^
       flags.hashCode ^
       length.hashCode ^
       group.hashCode ^
@@ -88,7 +94,6 @@ class Packet {
           runtimeType == other.runtimeType &&
           header == other.header &&
           content.length == other.content.length &&
-          // slow, but this is only used in tests
           content.toString() == other.content.toString();
 
   @override
