@@ -26,7 +26,7 @@ class SmpSerial implements Encoding {
   static const int _frameStart2 = 0x09;
   static const int _frameCont1 = 0x04;
   static const int _frameCont2 = 0x14;
-  static const int _maxBase64PerLine = 128;
+  static const int _maxBase64PerLine = 124; // matches AuTerm (93 raw bytes)
 
   @override
   List<int> encode(Packet msg) {
